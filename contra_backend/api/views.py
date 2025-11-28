@@ -213,15 +213,26 @@ class FormatStatement(APIView):
         def generate_summary_report(matched_df, df_storage, separate_canon_map, final_canon_map, final_file_label, acc_name_storage):
             summary_data = []
             
+            print("🔍 Generating summary report...")
+            print(f"Files in matched_df: {list(matched_df.keys())}")
+            print(f"Files in separate_canon_map: {list(separate_canon_map.keys())}")
+            
             for canon, sep_sheet in separate_canon_map.items():
                 final_sheet = final_canon_map.get(canon)
                 if final_sheet is None:
+                    print(f"⚠️ Skipping {sep_sheet} - no matching final sheet")
+                    continue
+
+                # Ensure the file exists in matched_df
+                if sep_sheet not in matched_df:
+                    print(f"⚠️ {sep_sheet} not in matched_df, skipping")
                     continue
 
                 auto_df_full = matched_df.get(sep_sheet)
                 manual_df_full = df_storage.get(final_sheet)
 
                 if auto_df_full is None or manual_df_full is None:
+                    print(f"⚠️ Skipping {sep_sheet} - missing data (auto: {auto_df_full is not None}, manual: {manual_df_full is not None})")
                     continue
 
                 # Get counts
@@ -262,15 +273,18 @@ class FormatStatement(APIView):
                 bank_name = [key for key, value in SHORT_BANK_NAMES.items() if value == bank_value][0]
                 
                 summary_data.append({
-                    "File Name": file_name,  # Use the new format
-                    "Bank Name": bank_name,  # Add bank name
+                    "File Name": file_name,
+                    "Bank Name": bank_name,
                     "Total Entries (Manual)": total_entries_manual,
                     "Total Entries (Software)": total_entries_software,
                     "Manual Matched": manual_matched,
                     "Software Matched": software_matched,
                     "Percentage": f"{percentage:.2f}%"
                 })
+                
+                print(f"✅ Added to summary: {file_name}")
             
+            print(f"📊 Summary report generated for {len(summary_data)} files")
             return summary_data
 
         # -------------------- Basic file checks -------------------- #
@@ -387,6 +401,8 @@ class FormatStatement(APIView):
             analysis_storage[sheet_name] = wb_src["Analysis"]
             statement_storage[sheet_name] = wb_src["Statements Considered"]
 
+        print(f"📁 Loaded {len(bank_data_storage)} separate files: {list(bank_data_storage.keys())}")
+
         # -------------------- Validate final XNS sheets vs separate files -------------------- #
         all_sheets = pd.ExcelFile(final_upload)
         final_xns_sheets = [s for s in all_sheets.sheet_names if "XNS" in s.upper()]
@@ -404,41 +420,88 @@ class FormatStatement(APIView):
             """Normalize sheet name to consistent format: BANKCODE-ACCNUM-PRODUCT"""
             sheet_name = str(sheet_name).strip().upper().replace(' ', '')
             
-            # Pattern 1: BANKCODE-ACCNUM-PRODUCT (e.g., SBI-2380-CA)
+            # Pattern 1: BANKCODE-ACCNUM-PRODUCT (e.g., HDFC-2614-CA, SBI-2380-CA)
             pattern1 = r'([A-Z]{3,4})[-_]?(\d{4})[-_]?([A-Z]{2})'
             match = re.search(pattern1, sheet_name)
             
             if match:
                 bank_code, acc_num, product = match.groups()
-                return f"{bank_code}-{acc_num}-{product}"
+                result = f"{bank_code}-{acc_num}-{product}"
+                return result
             
-            # Pattern 2: ACCNUM-BANKCODE-PRODUCT (e.g., 2380-SBI-CA)
+            # Pattern 2: ACCNUM-BANKCODE-PRODUCT (e.g., 2614-HDFC-CA, 2380-SBI-CA)
             pattern2 = r'(\d{4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
             match = re.search(pattern2, sheet_name)
             
             if match:
                 acc_num, bank_code, product = match.groups()
-                return f"{bank_code}-{acc_num}-{product}"
+                result = f"{bank_code}-{acc_num}-{product}"
+                return result
             
-            # Pattern 3: Any order with 3-4 letter bank code and 4-digit account number
-            pattern3 = r'([A-Z]{3,4})|(\d{4})|([A-Z]{2})'
-            matches = re.findall(pattern3, sheet_name)
+            # Pattern 3: XNS-BANKCODE-ACCNUM-PRODUCT (e.g., XNS-HDFC-2614-CA)
+            pattern3 = r'XNS[-_]?([A-Z]{3,4})[-_]?(\d{4})[-_]?([A-Z]{2})'
+            match = re.search(pattern3, sheet_name)
             
-            # Extract components from matches
-            components = []
-            for match in matches:
-                components.extend([m for m in match if m])
+            if match:
+                bank_code, acc_num, product = match.groups()
+                result = f"{bank_code}-{acc_num}-{product}"
+                return result
             
-            if len(components) >= 3:
-                # Identify bank code (3-4 letters), account number (4 digits), product (2 letters)
-                bank_code = next((c for c in components if len(c) in [3, 4] and c.isalpha()), None)
-                acc_num = next((c for c in components if len(c) == 4 and c.isdigit()), None)
-                product = next((c for c in components if len(c) == 2 and c.isalpha() and c != bank_code), None)
-                
-                if bank_code and acc_num and product:
-                    return f"{bank_code}-{acc_num}-{product}"
+            # Pattern 4: XNS-ACCNUM-BANKCODE-PRODUCT (e.g., XNS-2614-HDFC-CA)
+            pattern4 = r'XNS[-_]?(\d{4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
+            match = re.search(pattern4, sheet_name)
+            
+            if match:
+                acc_num, bank_code, product = match.groups()
+                result = f"{bank_code}-{acc_num}-{product}"
+                return result
             
             return sheet_name
+
+        # -------------------- REFORMAT FINAL SHEET NAMES -------------------- #
+        def reformat_final_sheet_name(sheet_name):
+            """
+            Convert final sheet names from 'XNS-2614-HDFC-CA' to 'XNS-HDFC-2614-CA'
+            to match the processed file format.
+            """
+            sheet_name = str(sheet_name).strip().upper()
+            
+            # Pattern for final file format: XNS-ACCNUM-BANKCODE-PRODUCT
+            pattern = r'XNS[-_]?(\d{4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
+            match = re.search(pattern, sheet_name)
+            
+            if match:
+                acc_num, bank_code, product = match.groups()
+                # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
+                new_name = f"XNS-{bank_code}-{acc_num}-{product}"
+                print(f"🔁 Reformatted final sheet: '{sheet_name}' -> '{new_name}'")
+                return new_name
+            
+            # If it's already in the correct format, return as is
+            return sheet_name
+
+        # Reformat final sheet names to match processed file format
+        print("=== REFORMATTING FINAL SHEET NAMES ===")
+        reformatted_final_sheets = []
+        df_storage = {}
+        
+        for sheet in all_sheets.sheet_names:
+            if "XNS" in sheet.upper():
+                # Reformat the sheet name to match processed file format
+                reformatted_sheet = reformat_final_sheet_name(sheet)
+                reformatted_final_sheets.append(reformatted_sheet)
+                
+                # Load the data with original sheet name, but store with reformatted name
+                df = pd.read_excel(final_upload, sheet_name=sheet)
+                for col in list(df.columns):
+                    if "Unnamed" in str(col):
+                        df.drop(columns=[col], inplace=True)
+                df_storage[reformatted_sheet] = df
+                print(f"✅ Loaded: '{sheet}' -> stored as '{reformatted_sheet}'")
+
+        # Update final_xns_sheets to use reformatted names
+        final_xns_sheets = reformatted_final_sheets
+        print(f"Reformatted final sheets: {final_xns_sheets}")
 
         separate_sheet_names = list(bank_data_storage.keys())
         separate_canon_map = {canonical_sheet_id(s): s for s in separate_sheet_names}
@@ -446,6 +509,12 @@ class FormatStatement(APIView):
 
         separate_canon_set = {normalize_sheet_name(name) for name in set(separate_canon_map.keys())}
         final_canon_set = {normalize_sheet_name(name) for name in set(final_canon_map.keys())}
+
+        print("=== CANONICAL MAPPING AFTER REFORMATTING ===")
+        print("Separate canon map:", separate_canon_map)
+        print("Final canon map:", final_canon_map)
+        print("Separate canon set:", separate_canon_set)
+        print("Final canon set:", final_canon_set)
 
         if separate_canon_set != final_canon_set:
             missing_in_separate = sorted(final_canon_set - separate_canon_set)
@@ -1028,7 +1097,11 @@ class FormatStatement(APIView):
                 fill_type="solid", start_color="FFC6EFCE", end_color="FFC6EFCE"
             )
 
+            print(f"💾 Saving {len(dfs_dict)} files with styles...")
+            
             for key, df in dfs_dict.items():
+                print(f"   Processing: {key}")
+                
                 src_analysis_ws = analysis_storage[key]
                 src_statement_ws = statement_storage[key]
 
@@ -1224,20 +1297,25 @@ class FormatStatement(APIView):
                     )
 
                     automate_files.append(filename)
-                print(f"Saved styled file: {filename}")
+                print(f"✅ Saved styled file: {filename}")
 
         # --------- run comparison between accounts --------- #
         matched_df = compare_files(bank_data_storage)
 
-        # ---------- load FINAL workbook into df_storage ---------- #
-        df_storage = {}
-        for sheet in all_sheets.sheet_names:
-            if "XNS" in sheet.upper():
-                df = pd.read_excel(final_upload, sheet_name=sheet)
-                for col in list(df.columns):
-                    if "Unnamed" in str(col):
-                        df.drop(columns=[col], inplace=True)
-                df_storage[sheet] = df
+        # DEBUG: Check what files we have after comparison
+        print("=== AFTER COMPARISON DEBUG ===")
+        print(f"Files in matched_df: {list(matched_df.keys())}")
+        print(f"Files in bank_data_storage: {list(bank_data_storage.keys())}")
+        
+        # Ensure ALL files are in matched_df
+        all_files_to_process = {}
+        for key in bank_data_storage.keys():
+            if key in matched_df:
+                all_files_to_process[key] = matched_df[key]
+                print(f"✅ Using matched data for: {key}")
+            else:
+                all_files_to_process[key] = bank_data_storage[key]
+                print(f"⚠️ Using original data for: {key} (not in matched_df)")
 
         # ---------- row count summary (separate vs final) ---------- #
         row_count_summary = {}
@@ -1333,17 +1411,24 @@ class FormatStatement(APIView):
         highlight_green_positions = {}
         any_mismatch = False
 
+        print("=== STARTING PROCESSED vs FINAL COMPARISON ===")
+        print(f"Total comparisons to make: {len(separate_canon_map)}")
+        
         for canon, sep_sheet in separate_canon_map.items():
             final_sheet = final_canon_map.get(canon)
             if final_sheet is None:
+                print(f"❌ Skipping {sep_sheet} - no matching final sheet found")
                 continue
-
-            auto_df_full = matched_df.get(sep_sheet)  # Full processed file (no filter)
+            
+            auto_df_full = all_files_to_process.get(sep_sheet)  # Use the full processed files
             manual_df_full = df_storage.get(final_sheet)  # Full final file
 
             if auto_df_full is None or manual_df_full is None:
+                print(f"⚠️ Skipping comparison for {sep_sheet} - missing data")
                 continue
 
+            print(f"\n🔍 COMPARISON: {sep_sheet} vs {final_sheet}")
+            
             # Compare INB TRF/SIS CON rows (using filtered data for comparison)
             comparison_result = compare_inb_sis_rows(auto_df_full, manual_df_full)
 
@@ -1352,7 +1437,6 @@ class FormatStatement(APIView):
                 "INB TRF/SIS CON Comparison": comparison_result
             }
 
-            print(f"\n🔍 COMPARISON: {sep_sheet} vs {final_sheet}")
             print(f"  Processed INB TRF rows: {comparison_result['auto_inb_count']}")
             print(f"  Final INB TRF/SIS CON rows: {comparison_result['manual_inb_sis_count']}")
             print(f"  Rows only in processed (green): {comparison_result['auto_only_rows']}")
@@ -1435,16 +1519,22 @@ class FormatStatement(APIView):
 
         # now save processed files with mismatch highlight (only in processed files)
         save_matched_with_styles(
-            matched_df, acc_name_storage, highlight_red_positions, highlight_green_positions
+            all_files_to_process, acc_name_storage, highlight_red_positions, highlight_green_positions
         )
 
-        # Generate the summary report (but don't display it)
-        summary_report = generate_summary_report(matched_df, df_storage, separate_canon_map, final_canon_map, final_file_label, acc_name_storage)
+        # Generate the summary report
+        summary_report = generate_summary_report(all_files_to_process, df_storage, separate_canon_map, final_canon_map, final_file_label, acc_name_storage)
+
+        # DEBUG: Check summary report before Google Sheets
+        print("=== BEFORE GOOGLE SHEETS UPDATE ===")
+        print(f"Summary report has {len(summary_report)} files:")
+        for item in summary_report:
+            print(f"   - {item['File Name']}")
 
         # Update Google Sheets with the report data
         sheets_update_success = update_google_sheets(summary_report, final_file_label)
 
-        # Update the final response (remove summary display from response)
+        # Update the final response
         response_data = {
             "success": True,
             "message": (
@@ -1460,7 +1550,10 @@ class FormatStatement(APIView):
             "has_mismatch": any_mismatch,
             "row_count_summary": row_count_summary,
             "mismatch_summary": mismatch_summary,
-            "google_sheets_updated": sheets_update_success
+            "google_sheets_updated": sheets_update_success,
+            "files_processed": len(all_files_to_process),
+            "files_in_summary": len(summary_report)
         }
 
         return Response(response_data, status=status.HTTP_200_OK)
+    
