@@ -1,0 +1,14 @@
+# In the .gitignore file:
+
+# Correct path for the original secret file location (even if moved)
+contra_backend/api/robust-shadow-471605-k1-6152c9ae90ff.json
+
+# Exclude compiled Python files and cache directories
+*.pyc
+__pycache__/
+
+# Exclude environment files
+.env
+
+# Exclude the temporary storage folder
+safe_storage/
