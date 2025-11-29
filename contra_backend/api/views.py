@@ -54,6 +54,7 @@ class FormatStatement(APIView):
             "IndusInd Bank, India": "INDB",
             "Jana Small Finance Bank Ltd, India": "JSFB",
             "Karur Vysya Bank, India": "KVB",
+            "Karnataka Bank, India": "KARB",
             "Kotak Mahindra Bank, India": "KKBK",
             "Punjab National Bank, India": "PNB",
             "RBL Bank, India": "RBL",
@@ -63,6 +64,7 @@ class FormatStatement(APIView):
             "Tamilnad Mercantile Bank Ltd., India": "TMB",
             "Union Bank of India, India": "UBI",
             "Ujjivan Bank, India": "UJVN",
+            "UCO Bank, India": "UCO",
             "Yes Bank, India": "YES",
         }
 
@@ -458,26 +460,43 @@ class FormatStatement(APIView):
             
             return sheet_name
 
-        # -------------------- REFORMAT FINAL SHEET NAMES -------------------- #
         def reformat_final_sheet_name(sheet_name):
-            """
-            Convert final sheet names from 'XNS-2614-HDFC-CA' to 'XNS-HDFC-2614-CA'
-            to match the processed file format.
-            """
             sheet_name = str(sheet_name).strip().upper()
             
-            # Pattern for final file format: XNS-ACCNUM-BANKCODE-PRODUCT
-            pattern = r'XNS[-_]?(\d{4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
-            match = re.search(pattern, sheet_name)
+            # Pattern 1: XNS-ACCNUM-BANKCODE-PRODUCT (original format)
+            pattern1 = r'XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
+            match1 = re.search(pattern1, sheet_name)
             
-            if match:
-                acc_num, bank_code, product = match.groups()
+            if match1:
+                acc_num, bank_code, product = match1.groups()
+                
+                # Add 'X' prefix if account number is 3 digits
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                
                 # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
                 new_name = f"XNS-{bank_code}-{acc_num}-{product}"
-                print(f"🔁 Reformatted final sheet: '{sheet_name}' -> '{new_name}'")
+                print(f"🔁 Reformatted final sheet (format 1): '{sheet_name}' -> '{new_name}'")
                 return new_name
             
-            # If it's already in the correct format, return as is
+            # Pattern 2: BANKCODE-ACCNUM-PRODUCT-XNS (your new format)
+            pattern2 = r'([A-Z]{3,4})[-_]?(\d{3,4})[-_]?([A-Z]{2})[-_]?XNS'
+            match2 = re.search(pattern2, sheet_name)
+            
+            if match2:
+                bank_code, acc_num, product = match2.groups()
+                
+                # Add 'X' prefix if account number is 3 digits
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                
+                # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
+                new_name = f"XNS-{bank_code}-{acc_num}-{product}"
+                print(f"🔁 Reformatted final sheet (format 2): '{sheet_name}' -> '{new_name}'")
+                return new_name
+            
+            # If it's already in the correct format or doesn't match, return as is
+            print(f"ℹ️  No reformatting needed for: '{sheet_name}'")
             return sheet_name
 
         # Reformat final sheet names to match processed file format
@@ -1411,23 +1430,82 @@ class FormatStatement(APIView):
         highlight_green_positions = {}
         any_mismatch = False
 
-        print("=== STARTING PROCESSED vs FINAL COMPARISON ===")
-        print(f"Total comparisons to make: {len(separate_canon_map)}")
-        
+        print("=== VALIDATING SHEET MATCHING BEFORE COMPARISON ===")
+
+        # Check if all separate files have matching final sheets
+        missing_final_sheets = []
         for canon, sep_sheet in separate_canon_map.items():
             final_sheet = final_canon_map.get(canon)
             if final_sheet is None:
-                print(f"❌ Skipping {sep_sheet} - no matching final sheet found")
-                continue
+                missing_final_sheets.append(sep_sheet)
+                print(f"❌ No final sheet found for: {sep_sheet}")
+
+        # Check if all final sheets have matching separate files  
+        missing_separate_files = []
+        for canon, final_sheet in final_canon_map.items():
+            sep_sheet = separate_canon_map.get(canon)
+            if sep_sheet is None:
+                missing_separate_files.append(final_sheet)
+                print(f"❌ No separate file found for final sheet: {final_sheet}")
+
+        # If there are any mismatches, return error immediately
+        if missing_final_sheets or missing_separate_files:
+            print(f"\n🚨 SHEET MATCHING ERROR:")
+            print(f"   Final file has {len(final_canon_map)} sheets")
+            print(f"   You uploaded {len(separate_canon_map)} files")
             
-            auto_df_full = all_files_to_process.get(sep_sheet)  # Use the full processed files
-            manual_df_full = df_storage.get(final_sheet)  # Full final file
+            if missing_final_sheets:
+                print(f"   ❌ Missing final sheets for {len(missing_final_sheets)} uploaded files:")
+                for file in missing_final_sheets:
+                    print(f"      - {file}")
+            
+            if missing_separate_files:
+                print(f"   ❌ Missing uploaded files for {len(missing_separate_files)} final sheets:")
+                for sheet in missing_separate_files:
+                    print(f"      - {sheet}")
+            
+            # Return error response
+            return Response(
+                {
+                    "error": f"Sheet matching failed. Final file has {len(final_canon_map)} sheets but you uploaded {len(separate_canon_map)} files.",
+                    "details": {
+                        "final_sheets_count": len(final_canon_map),
+                        "uploaded_files_count": len(separate_canon_map),
+                        "missing_final_sheets_count": len(missing_final_sheets),
+                        "missing_separate_files_count": len(missing_separate_files),
+                        "missing_final_sheets_for_files": missing_final_sheets,
+                        "missing_files_for_final_sheets": missing_separate_files,
+                        "all_final_sheets": list(final_canon_map.values()),
+                        "all_uploaded_files": list(separate_canon_map.values())
+                    }
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-            if auto_df_full is None or manual_df_full is None:
-                print(f"⚠️ Skipping comparison for {sep_sheet} - missing data")
-                continue
+        # If we reach here, all sheets are matched
+        print(f"✅ ALL SHEETS MATCHED SUCCESSFULLY!")
+        print(f"   Final sheets: {len(final_canon_map)}")
+        print(f"   Uploaded files: {len(separate_canon_map)}")
+        print(f"   Starting comparison process...\n")
 
-            print(f"\n🔍 COMPARISON: {sep_sheet} vs {final_sheet}")
+        # NOW START THE COMPARISON
+        print("=== STARTING PROCESSED vs FINAL COMPARISON ===")
+        print(f"Total comparisons to make: {len(separate_canon_map)}")
+
+        comparisons_made = []
+        any_mismatch = False
+
+        for canon, sep_sheet in separate_canon_map.items():
+            final_sheet = final_canon_map.get(canon)
+            
+            # Since we already validated, these should never be None
+            auto_df_full = all_files_to_process.get(sep_sheet)
+            manual_df_full = df_storage.get(final_sheet)
+
+            # Add to comparisons made list
+            comparisons_made.append(sep_sheet)
+            
+            print(f"\n🔍 COMPARISON {len(comparisons_made)}/{len(separate_canon_map)}: {sep_sheet} vs {final_sheet}")
             
             # Compare INB TRF/SIS CON rows (using filtered data for comparison)
             comparison_result = compare_inb_sis_rows(auto_df_full, manual_df_full)
@@ -1516,6 +1594,11 @@ class FormatStatement(APIView):
                 if red_positions:
                     highlight_red_positions[sep_sheet] = set(red_positions)
                     print(f"  🔴 Highlighting {len(red_positions)} rows in processed file (potential matches for final-only rows)")
+
+        print(f"\n✅ COMPARISON COMPLETED SUCCESSFULLY!")
+        print(f"   Total comparisons made: {len(comparisons_made)}")
+        print(f"   Files compared: {comparisons_made}")
+        print(f"   Data mismatches found: {'Yes' if any_mismatch else 'No'}")
 
         # now save processed files with mismatch highlight (only in processed files)
         save_matched_with_styles(

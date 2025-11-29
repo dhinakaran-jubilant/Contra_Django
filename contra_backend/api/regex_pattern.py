@@ -171,6 +171,9 @@ pattern = {
         r"(?i)\bUPI.*?([0-9]{9,16})",
         r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
     ],
+    "KARB": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
     "SBI": [
         r"(?i)^BY TRANSFER.*?RTGS UTR NO:\s*([A-Z0-9]+)-",
         r"(?i)^BY TRANSFER-NEFT\*[A-Z0-9\s]+\*([A-Z0-9]+)\s*\*",
@@ -422,6 +425,9 @@ pattern = {
         r"(?i)\b(\d+IMPSINB\d+)\b",
         r"(?i)\b(IMPSCUB\d+)\b",
         r"(?i)\b([A-Z]{4}[A-Z0-9]{10,26})\b",
+    ],
+    "UCO": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
     ],
     "YES": [
         r"(?i)/IMPS/P2A/(\d{10,16})/",
