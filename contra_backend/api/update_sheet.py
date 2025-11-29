@@ -20,7 +20,7 @@ def update_google_sheets(summary_report, final_file_label):
 
         # Use the path from settings
         key_file_path = r"../safe_storage/robust-shadow-471605-k1-6152c9ae90ff.json"
-        key_file_path = settings.GOOGLE_SHEETS_CREDENTIALS_PATH
+        # key_file_path = settings.GOOGLE_SHEETS_CREDENTIALS_PATH
         
         print(f"Looking for key file at: {key_file_path}")
         print(f"File exists: {os.path.exists(key_file_path)}")

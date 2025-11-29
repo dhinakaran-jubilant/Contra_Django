@@ -423,68 +423,100 @@ class FormatStatement(APIView):
             sheet_name = str(sheet_name).strip().upper().replace(' ', '')
             
             # Pattern 1: BANKCODE-ACCNUM-PRODUCT (e.g., HDFC-2614-CA, SBI-2380-CA)
-            pattern1 = r'([A-Z]{3,4})[-_]?(\d{4})[-_]?([A-Z]{2})'
+            pattern1 = r'([A-Z]{3,4})[-_]?(\d{3,4})[-_]?([A-Z]{2})'
             match = re.search(pattern1, sheet_name)
             
             if match:
                 bank_code, acc_num, product = match.groups()
+                
+                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                    
                 result = f"{bank_code}-{acc_num}-{product}"
                 return result
             
             # Pattern 2: ACCNUM-BANKCODE-PRODUCT (e.g., 2614-HDFC-CA, 2380-SBI-CA)
-            pattern2 = r'(\d{4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
+            pattern2 = r'(\d{3,4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
             match = re.search(pattern2, sheet_name)
             
             if match:
                 acc_num, bank_code, product = match.groups()
+                
+                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                    
                 result = f"{bank_code}-{acc_num}-{product}"
                 return result
             
             # Pattern 3: XNS-BANKCODE-ACCNUM-PRODUCT (e.g., XNS-HDFC-2614-CA)
-            pattern3 = r'XNS[-_]?([A-Z]{3,4})[-_]?(\d{4})[-_]?([A-Z]{2})'
+            pattern3 = r'XNS[-_]?([A-Z]{3,4})[-_]?(\d{3,4})[-_]?([A-Z]{2})'
             match = re.search(pattern3, sheet_name)
             
             if match:
                 bank_code, acc_num, product = match.groups()
+                
+                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                    
                 result = f"{bank_code}-{acc_num}-{product}"
                 return result
             
             # Pattern 4: XNS-ACCNUM-BANKCODE-PRODUCT (e.g., XNS-2614-HDFC-CA)
-            pattern4 = r'XNS[-_]?(\d{4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
+            pattern4 = r'XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
             match = re.search(pattern4, sheet_name)
             
             if match:
                 acc_num, bank_code, product = match.groups()
+                
+                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                    
                 result = f"{bank_code}-{acc_num}-{product}"
                 return result
             
             return sheet_name
 
         def reformat_final_sheet_name(sheet_name):
-            sheet_name = str(sheet_name).strip().upper()
+            # Remove all spaces and convert to uppercase
+            sheet_name = str(sheet_name).replace(" ", "").strip().upper()
             
-            # Pattern 1: XNS-ACCNUM-BANKCODE-PRODUCT (original format)
-            pattern1 = r'XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
+            # Pattern 1: BANKCODE-ACCNUM-PRODUCT (your final sheet format - needs X prefix)
+            # This matches BOB-361-CA, HDFC-123-CA, etc.
+            pattern1 = r'([A-Z]{3,5})[-_]?(\d{3})[-_]?([A-Z]{2})'
             match1 = re.search(pattern1, sheet_name)
             
             if match1:
-                acc_num, bank_code, product = match1.groups()
+                bank_code, acc_num, product = match1.groups()
                 
-                # Add 'X' prefix if account number is 3 digits
-                if len(acc_num) == 3:
-                    acc_num = 'X' + acc_num
+                # Add 'X' prefix to 3-digit account number
+                acc_num = 'X' + acc_num
                 
-                # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
-                new_name = f"XNS-{bank_code}-{acc_num}-{product}"
-                print(f"🔁 Reformatted final sheet (format 1): '{sheet_name}' -> '{new_name}'")
+                # Reformat to: BANKCODE-XACCNUM-PRODUCT
+                new_name = f"{bank_code}-{acc_num}-{product}"
+                print(f"🔁 Reformatted final sheet (pattern 1): '{sheet_name}' -> '{new_name}'")
                 return new_name
             
-            # Pattern 2: BANKCODE-ACCNUM-PRODUCT-XNS (your new format)
-            pattern2 = r'([A-Z]{3,4})[-_]?(\d{3,4})[-_]?([A-Z]{2})[-_]?XNS'
+            # Pattern 2: BANKCODE-ACCNUM-PRODUCT (4-digit account - no X prefix needed)
+            pattern2 = r'([A-Z]{3,5})[-_]?(\d{4})[-_]?([A-Z]{2})'
             match2 = re.search(pattern2, sheet_name)
             
             if match2:
                 bank_code, acc_num, product = match2.groups()
+                # 4-digit account, no X prefix needed
+                new_name = f"{bank_code}-{acc_num}-{product}"
+                print(f"🔁 Reformatted final sheet (pattern 2): '{sheet_name}' -> '{new_name}'")
+                return new_name
+            
+            # Pattern 3: XNS-ACCNUM-BANKCODE-PRODUCT (original format)
+            pattern3 = r'XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,5})[-_]?([A-Z]{2})'
+            match3 = re.search(pattern3, sheet_name)
+            
+            if match3:
+                acc_num, bank_code, product = match3.groups()
                 
                 # Add 'X' prefix if account number is 3 digits
                 if len(acc_num) == 3:
@@ -492,7 +524,39 @@ class FormatStatement(APIView):
                 
                 # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
                 new_name = f"XNS-{bank_code}-{acc_num}-{product}"
-                print(f"🔁 Reformatted final sheet (format 2): '{sheet_name}' -> '{new_name}'")
+                print(f"🔁 Reformatted final sheet (pattern 3): '{sheet_name}' -> '{new_name}'")
+                return new_name
+            
+            # Pattern 4: BANKCODE-ACCNUM-PRODUCT-XNS (your new format)
+            pattern4 = r'([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})[-_]?XNS'
+            match4 = re.search(pattern4, sheet_name)
+            
+            if match4:
+                bank_code, acc_num, product = match4.groups()
+                
+                # Add 'X' prefix if account number is 3 digits
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                
+                # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
+                new_name = f"XNS-{bank_code}-{acc_num}-{product}"
+                print(f"🔁 Reformatted final sheet (pattern 4): '{sheet_name}' -> '{new_name}'")
+                return new_name
+            
+            # Pattern 5: XNS - BANKCODE - ACCNUM - PRODUCT (format with spaces around dashes)
+            pattern5 = r'XNS[-_]?([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})'
+            match5 = re.search(pattern5, sheet_name)
+            
+            if match5:
+                bank_code, acc_num, product = match5.groups()
+                
+                # Add 'X' prefix if account number is 3 digits
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                
+                # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
+                new_name = f"XNS-{bank_code}-{acc_num}-{product}"
+                print(f"🔁 Reformatted final sheet (pattern 5): '{sheet_name}' -> '{new_name}'")
                 return new_name
             
             # If it's already in the correct format or doesn't match, return as is
