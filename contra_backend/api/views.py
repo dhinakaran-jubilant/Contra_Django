@@ -69,7 +69,7 @@ class FormatStatement(APIView):
             "Union Bank of India, India": "UBI",
             "Ujjivan Bank, India": "UJVN",
             "UCO Bank, India": "UCO",
-            "Yes Bank, India": "YES",
+            "Yes Bank, India": "YBL",
         }
 
         # -------------------- Helpers -------------------- #
@@ -87,7 +87,7 @@ class FormatStatement(APIView):
             ]
             sub = df[df[1].isin(wanted)]
             info = dict(zip(sub[1], sub[2]))
-            account_number = str(info['Account Number'])
+            account_number = str(info['Account Number']).strip()
             last_4_digits = account_number[-4:] if len(account_number) >= 4 else account_number
             
             sheet_name = (

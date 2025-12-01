@@ -414,7 +414,7 @@ pattern = {
         r"(?i)\b(IMPSCUB\d+)\b",
         r"(?i)\b([A-Z]{4}[A-Z0-9]{10,26})\b",
     ],
-    "YES": [
+    "YBL": [
         r"(?i)/IMPS/P2A/(\d{10,16})/",
         r"(?i)/(?:NEFT|RTGS)/[^/]+/([A-Z0-9]{10,30})/",
         r"(?i)\b(?:BY|TO)\s+ONL\s+([A-Z0-9]+):",
