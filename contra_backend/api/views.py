@@ -675,15 +675,28 @@ class FormatStatement(APIView):
             missing_in_separate = sorted(final_canon_set - separate_canon_set)
             missing_in_final = sorted(separate_canon_set - final_canon_set)
             
+            # Create clear error message - only show unmatched
+            error_message = "❌ SHEET MATCHING FAILED: "
+            
+            if missing_in_separate:
+                for sheet in missing_in_separate:
+                    error_message += f"{sheet}"
+                    error_message += ", "
+            
+            if missing_in_final:
+                for sheet in missing_in_final:
+                    error_message += f"{sheet}"
+                    error_message += ", "
+            
             return Response(
                 {
-                    "error": "Final file's XNS sheets and separate files do not match.",
+                    "error": error_message,
                     "details": {
-                        "final_xns_sheets": final_xns_sheets,
-                        "separate_sheet_names": separate_sheet_names,
-                        "canonical_in_final_not_in_separate": missing_in_separate,
-                        "canonical_in_separate_not_in_final": missing_in_final,
-                    },
+                        "software_sheets": sorted(list(separate_canon_set)),  # All software sheets
+                        "final_sheets": sorted(list(final_canon_set)),        # All final sheets
+                        "unmatched_software_sheets": missing_in_final,        # Sheets only in software
+                        "unmatched_final_sheets": missing_in_separate,        # Sheets only in final
+                    }
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
