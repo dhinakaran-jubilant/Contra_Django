@@ -90,11 +90,13 @@ def update_google_sheets(summary_report, final_file_label):
                 skipped_rows += 1
                 continue
             
-            # Calculate percentage
+            # Calculate percentage - fix for when both are 0
             if item["Manual Matched"] > 0:
                 percentage = (item["Software Matched"] / item["Manual Matched"]) * 100
+            elif item["Manual Matched"] == 0 and item["Software Matched"] == 0:
+                percentage = 100.00  # Both are 0, so 100% match
             else:
-                percentage = 0
+                percentage = 0  # Manual is 0 but Software has matches
             
             new_row_data = [
                 next_row - 1,  # Serial number (adjusting for header row)

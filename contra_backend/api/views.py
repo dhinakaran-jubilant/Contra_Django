@@ -40,9 +40,12 @@ class FormatStatement(APIView):
             "Axis Bank, India": "AXIS",
             "Bank of Baroda, India": "BOB",
             "Bank of India, India": "BOI",
+            "Bandhan Bank, India": "BDBL",
             "Canara Bank, India": "CNRB",
             "City Union Bank, India": "CUB",
+            "Catholic Syrian Bank, India": "CSB",
             "DBS Bank, India": "DBS",
+            "Deutsche Bank, India": "DEUT",
             "Federal Bank, India": "FDRL",
             "HDFC Bank, India": "HDFC",
             "ICICI Bank, India": "ICICI",
@@ -60,6 +63,7 @@ class FormatStatement(APIView):
             "RBL Bank, India": "RBL",
             "South Indian Bank, India": "SIB",
             "State Bank of India, India": "SBI",
+            "Standard Chartered Bank, India": "",
             "Tamilnad Mercantile Bank Ltd, India": "TMB",
             "Tamilnad Mercantile Bank Ltd., India": "TMB",
             "Union Bank of India, India": "UBI",
@@ -83,9 +87,12 @@ class FormatStatement(APIView):
             ]
             sub = df[df[1].isin(wanted)]
             info = dict(zip(sub[1], sub[2]))
+            account_number = str(info['Account Number'])
+            last_4_digits = account_number[-4:] if len(account_number) >= 4 else account_number
+            
             sheet_name = (
                 f"XNS-{SHORT_BANK_NAMES[info['Name of the Bank']]}-"
-                f"{info['Account Number'][-4:]}"
+                f"{last_4_digits}"
             )
             return sheet_name, info["Name of the Account Holder"]
 
@@ -203,13 +210,117 @@ class FormatStatement(APIView):
 
             return "OTHERS"
 
+        # Add this helper function
+        def is_valid_xns_sheet_name(sheet_name):
+            """
+            Check if a sheet name is a valid XNS sheet format
+            Valid formats:
+            - XNS-BANKCODE-ACCNUM-PRODUCT (e.g., XNS-IOB-4241-OD)
+            - XNS-ACCNUM-BANKCODE-PRODUCT (e.g., XNS-4241-IOB-OD)
+            - BANKCODE-ACCNUM-PRODUCT-XNS (e.g., IOB-4241-OD-XNS)
+            - BANKCODE-ACCNUM-PRODUCT (e.g., IOB-4241-OD)
+            """
+            sheet_name = str(sheet_name).upper().replace(' ', '')
+            
+            # Skip obviously invalid names
+            if sheet_name == "XNS":
+                return False
+            
+            # Check for valid patterns
+            valid_patterns = [
+                r'^XNS[-_][A-Z]{3,5}[-_]\d{3,4}[-_][A-Z]{2}$',  # XNS-BANKCODE-ACCNUM-PRODUCT
+                r'^XNS[-_]\d{3,4}[-_][A-Z]{3,5}[-_][A-Z]{2}$',  # XNS-ACCNUM-BANKCODE-PRODUCT
+                r'^[A-Z]{3,5}[-_]\d{3,4}[-_][A-Z]{2}[-_]XNS$',  # BANKCODE-ACCNUM-PRODUCT-XNS
+                r'^[A-Z]{3,5}[-_]\d{3,4}[-_][A-Z]{2}$',         # BANKCODE-ACCNUM-PRODUCT
+                r'^\d{3,4}[-_][A-Z]{3,5}[-_][A-Z]{2}$',         # ACCNUM-BANKCODE-PRODUCT
+            ]
+            
+            for pattern in valid_patterns:
+                if re.match(pattern, sheet_name):
+                    return True
+            
+            return False
+
         def canonical_sheet_id(name: str) -> str:
             """
             Normalise XNS sheet names so that:
             - 'XNS-SBI-0987-CA' and 'SBI-0987-CA-XNS' both become 'SBI-0987-CA'
+            - Also handles BOB-361-CA, 361-BOB-CA, etc.
+            - Returns empty string for invalid sheet names
             """
-            parts = [p for p in str(name).split("-") if p and p.upper() != "XNS"]
-            return "-".join(parts).upper()
+            name = str(name).strip().upper().replace(' ', '')
+            
+            # If the name is just "XNS" or doesn't look valid, return empty string
+            if name == "XNS" or re.search(r'^XNS[-_]\d+$', name):
+                print(f"❌ Invalid sheet name in canonical_sheet_id: '{name}'")
+                return ""
+            
+            # Debug: show what we're processing
+            print(f"🔍 canonical_sheet_id processing: '{name}'")
+            
+            # Pattern 1: XNS-BANKCODE-ACCNUM-PRODUCT (e.g., XNS-SBI-0987-CA)
+            pattern1 = r'^XNS[-_]?([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})$'
+            match1 = re.search(pattern1, name)
+            if match1:
+                bank_code, acc_num, product = match1.groups()
+                # Add X prefix for 3-digit accounts
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                result = f"{bank_code}-{acc_num}-{product}"
+                print(f"   Pattern 1 matched: {result}")
+                return result
+            
+            # Pattern 2: XNS-ACCNUM-BANKCODE-PRODUCT (e.g., XNS-0987-SBI-CA)
+            pattern2 = r'^XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,5})[-_]?([A-Z]{2})$'
+            match2 = re.search(pattern2, name)
+            if match2:
+                acc_num, bank_code, product = match2.groups()
+                # Add X prefix for 3-digit accounts
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                result = f"{bank_code}-{acc_num}-{product}"
+                print(f"   Pattern 2 matched: {result}")
+                return result
+            
+            # Pattern 3: BANKCODE-ACCNUM-PRODUCT-XNS (e.g., SBI-0987-CA-XNS)
+            pattern3 = r'^([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})[-_]?XNS$'
+            match3 = re.search(pattern3, name)
+            if match3:
+                bank_code, acc_num, product = match3.groups()
+                # Add X prefix for 3-digit accounts
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                result = f"{bank_code}-{acc_num}-{product}"
+                print(f"   Pattern 3 matched: {result}")
+                return result
+            
+            # Pattern 4: BANKCODE-ACCNUM-PRODUCT (e.g., SBI-0987-CA, BOB-361-CA)
+            pattern4 = r'^([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})$'
+            match4 = re.search(pattern4, name)
+            if match4:
+                bank_code, acc_num, product = match4.groups()
+                # Add X prefix for 3-digit accounts
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                result = f"{bank_code}-{acc_num}-{product}"
+                print(f"   Pattern 4 matched: {result}")
+                return result
+            
+            # Pattern 5: ACCNUM-BANKCODE-PRODUCT (e.g., 0987-SBI-CA)
+            pattern5 = r'^(\d{3,4})[-_]?([A-Z]{3,5})[-_]?([A-Z]{2})$'
+            match5 = re.search(pattern5, name)
+            if match5:
+                acc_num, bank_code, product = match5.groups()
+                # Add X prefix for 3-digit accounts
+                if len(acc_num) == 3:
+                    acc_num = 'X' + acc_num
+                result = f"{bank_code}-{acc_num}-{product}"
+                print(f"   Pattern 5 matched: {result}")
+                return result
+            
+            # If none of the patterns match, return empty string
+            print(f"   No pattern matched, returning empty string for: '{name}'")
+            return ""
 
         # -------------------- Generate Summary Report -------------------- #
         def generate_summary_report(matched_df, df_storage, separate_canon_map, final_canon_map, final_file_label, acc_name_storage):
@@ -246,7 +357,7 @@ class FormatStatement(APIView):
                     manual_df_full["TYPE"].astype(str).str.upper().isin(["INB TRF", "SIS CON"])
                 ]
                 software_inb_trf = auto_df_full[
-                    auto_df_full["TYPE"].astype(str).str.upper() == "INB TRF"
+                    auto_df_full["TYPE"].astype(str).str.upper().isin(["INB TRF", "SIS CON"])
                 ]
                 
                 manual_matched = len(manual_inb_sis)
@@ -417,76 +528,16 @@ class FormatStatement(APIView):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        
-        def normalize_sheet_name(sheet_name):
-            """Normalize sheet name to consistent format: BANKCODE-ACCNUM-PRODUCT"""
-            sheet_name = str(sheet_name).strip().upper().replace(' ', '')
-            
-            # Pattern 1: BANKCODE-ACCNUM-PRODUCT (e.g., HDFC-2614-CA, SBI-2380-CA)
-            pattern1 = r'([A-Z]{3,4})[-_]?(\d{3,4})[-_]?([A-Z]{2})'
-            match = re.search(pattern1, sheet_name)
-            
-            if match:
-                bank_code, acc_num, product = match.groups()
-                
-                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
-                if len(acc_num) == 3:
-                    acc_num = 'X' + acc_num
-                    
-                result = f"{bank_code}-{acc_num}-{product}"
-                return result
-            
-            # Pattern 2: ACCNUM-BANKCODE-PRODUCT (e.g., 2614-HDFC-CA, 2380-SBI-CA)
-            pattern2 = r'(\d{3,4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
-            match = re.search(pattern2, sheet_name)
-            
-            if match:
-                acc_num, bank_code, product = match.groups()
-                
-                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
-                if len(acc_num) == 3:
-                    acc_num = 'X' + acc_num
-                    
-                result = f"{bank_code}-{acc_num}-{product}"
-                return result
-            
-            # Pattern 3: XNS-BANKCODE-ACCNUM-PRODUCT (e.g., XNS-HDFC-2614-CA)
-            pattern3 = r'XNS[-_]?([A-Z]{3,4})[-_]?(\d{3,4})[-_]?([A-Z]{2})'
-            match = re.search(pattern3, sheet_name)
-            
-            if match:
-                bank_code, acc_num, product = match.groups()
-                
-                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
-                if len(acc_num) == 3:
-                    acc_num = 'X' + acc_num
-                    
-                result = f"{bank_code}-{acc_num}-{product}"
-                return result
-            
-            # Pattern 4: XNS-ACCNUM-BANKCODE-PRODUCT (e.g., XNS-2614-HDFC-CA)
-            pattern4 = r'XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,4})[-_]?([A-Z]{2})'
-            match = re.search(pattern4, sheet_name)
-            
-            if match:
-                acc_num, bank_code, product = match.groups()
-                
-                # ADD X PREFIX FOR 3-DIGIT ACCOUNT NUMBERS
-                if len(acc_num) == 3:
-                    acc_num = 'X' + acc_num
-                    
-                result = f"{bank_code}-{acc_num}-{product}"
-                return result
-            
-            return sheet_name
 
         def reformat_final_sheet_name(sheet_name):
             # Remove all spaces and convert to uppercase
             sheet_name = str(sheet_name).replace(" ", "").strip().upper()
             
+            print(f"🔍 Processing sheet name: '{sheet_name}'")
+            
             # Pattern 1: BANKCODE-ACCNUM-PRODUCT (your final sheet format - needs X prefix)
             # This matches BOB-361-CA, HDFC-123-CA, etc.
-            pattern1 = r'([A-Z]{3,5})[-_]?(\d{3})[-_]?([A-Z]{2})'
+            pattern1 = r'^([A-Z]{3,5})[-_]?(\d{3})[-_]?([A-Z]{2})$'
             match1 = re.search(pattern1, sheet_name)
             
             if match1:
@@ -501,7 +552,7 @@ class FormatStatement(APIView):
                 return new_name
             
             # Pattern 2: BANKCODE-ACCNUM-PRODUCT (4-digit account - no X prefix needed)
-            pattern2 = r'([A-Z]{3,5})[-_]?(\d{4})[-_]?([A-Z]{2})'
+            pattern2 = r'^([A-Z]{3,5})[-_]?(\d{4})[-_]?([A-Z]{2})$'
             match2 = re.search(pattern2, sheet_name)
             
             if match2:
@@ -511,8 +562,8 @@ class FormatStatement(APIView):
                 print(f"🔁 Reformatted final sheet (pattern 2): '{sheet_name}' -> '{new_name}'")
                 return new_name
             
-            # Pattern 3: XNS-ACCNUM-BANKCODE-PRODUCT (original format)
-            pattern3 = r'XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,5})[-_]?([A-Z]{2})'
+            # Pattern 3: XNS-ACCNUM-BANKCODE-PRODUCT (original format) - FIXED THIS PATTERN
+            pattern3 = r'^XNS[-_]?(\d{3,4})[-_]?([A-Z]{3,5})[-_]?([A-Z]{2})$'
             match3 = re.search(pattern3, sheet_name)
             
             if match3:
@@ -528,7 +579,7 @@ class FormatStatement(APIView):
                 return new_name
             
             # Pattern 4: BANKCODE-ACCNUM-PRODUCT-XNS (your new format)
-            pattern4 = r'([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})[-_]?XNS'
+            pattern4 = r'^([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})[-_]?XNS$'
             match4 = re.search(pattern4, sheet_name)
             
             if match4:
@@ -543,8 +594,8 @@ class FormatStatement(APIView):
                 print(f"🔁 Reformatted final sheet (pattern 4): '{sheet_name}' -> '{new_name}'")
                 return new_name
             
-            # Pattern 5: XNS - BANKCODE - ACCNUM - PRODUCT (format with spaces around dashes)
-            pattern5 = r'XNS[-_]?([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})'
+            # Pattern 5: XNS-BANKCODE-ACCNUM-PRODUCT (already correct format)
+            pattern5 = r'^XNS[-_]?([A-Z]{3,5})[-_]?(\d{3,4})[-_]?([A-Z]{2})$'
             match5 = re.search(pattern5, sheet_name)
             
             if match5:
@@ -554,7 +605,7 @@ class FormatStatement(APIView):
                 if len(acc_num) == 3:
                     acc_num = 'X' + acc_num
                 
-                # Reformat to: XNS-BANKCODE-ACCNUM-PRODUCT
+                # Already in correct format, just ensure X prefix
                 new_name = f"XNS-{bank_code}-{acc_num}-{product}"
                 print(f"🔁 Reformatted final sheet (pattern 5): '{sheet_name}' -> '{new_name}'")
                 return new_name
@@ -569,7 +620,8 @@ class FormatStatement(APIView):
         df_storage = {}
         
         for sheet in all_sheets.sheet_names:
-            if "XNS" in sheet.upper():
+            # Only process valid XNS sheets
+            if "XNS" in sheet.upper() and is_valid_xns_sheet_name(sheet):
                 # Reformat the sheet name to match processed file format
                 reformatted_sheet = reformat_final_sheet_name(sheet)
                 reformatted_final_sheets.append(reformatted_sheet)
@@ -580,18 +632,38 @@ class FormatStatement(APIView):
                     if "Unnamed" in str(col):
                         df.drop(columns=[col], inplace=True)
                 df_storage[reformatted_sheet] = df
-                print(f"✅ Loaded: '{sheet}' -> stored as '{reformatted_sheet}'")
+                print(f"✅ Loaded valid XNS sheet: '{sheet}' -> stored as '{reformatted_sheet}'")
+            elif "XNS" in sheet.upper():
+                print(f"⚠️  Skipping invalid XNS sheet: '{sheet}' (not a valid format)")
+            else:
+                print(f"ℹ️  Skipping non-XNS sheet: '{sheet}'")
 
-        # Update final_xns_sheets to use reformatted names
+        # Update final_xns_sheets to only include valid sheets
         final_xns_sheets = reformatted_final_sheets
-        print(f"Reformatted final sheets: {final_xns_sheets}")
+        print(f"📋 Valid final XNS sheets: {final_xns_sheets}")
 
         separate_sheet_names = list(bank_data_storage.keys())
-        separate_canon_map = {canonical_sheet_id(s): s for s in separate_sheet_names}
-        final_canon_map = {canonical_sheet_id(s): s for s in final_xns_sheets}
+        
+        # Create canonical maps, filtering out invalid sheets
+        separate_canon_map = {}
+        for s in separate_sheet_names:
+            canon = canonical_sheet_id(s)
+            if canon:  # Only add if canonical_sheet_id returned a non-empty string
+                separate_canon_map[canon] = s
+            else:
+                print(f"⚠️  Skipping invalid separate sheet: '{s}'")
 
-        separate_canon_set = {normalize_sheet_name(name) for name in set(separate_canon_map.keys())}
-        final_canon_set = {normalize_sheet_name(name) for name in set(final_canon_map.keys())}
+        final_canon_map = {}
+        for s in final_xns_sheets:
+            canon = canonical_sheet_id(s)
+            if canon:  # Only add if canonical_sheet_id returned a non-empty string
+                final_canon_map[canon] = s
+            else:
+                print(f"⚠️  Skipping invalid final sheet: '{s}'")
+
+        # Filter out empty strings from canon sets
+        separate_canon_set = {name for name in set(separate_canon_map.keys()) if name}
+        final_canon_set = {name for name in set(final_canon_map.keys()) if name}
 
         print("=== CANONICAL MAPPING AFTER REFORMATTING ===")
         print("Separate canon map:", separate_canon_map)
@@ -603,35 +675,18 @@ class FormatStatement(APIView):
             missing_in_separate = sorted(final_canon_set - separate_canon_set)
             missing_in_final = sorted(separate_canon_set - final_canon_set)
             
-            # NEW: User-friendly error message
-            if len(final_xns_sheets) > len(separate_files):
-                missing_count = len(final_xns_sheets) - len(separate_files)
-                return Response(
-                    {
-                        "error": f"{missing_count} software file(s) missing. Please upload the correct files.",
-                        "details": {
-                            "final_xns_sheets_count": len(final_xns_sheets),
-                            "separate_files_count": len(separate_files),
-                            "missing_files_count": missing_count,
-                            "final_sheet_names": final_xns_sheets,
-                            "separate_sheet_names": separate_sheet_names
-                        }
+            return Response(
+                {
+                    "error": "Final file's XNS sheets and separate files do not match.",
+                    "details": {
+                        "final_xns_sheets": final_xns_sheets,
+                        "separate_sheet_names": separate_sheet_names,
+                        "canonical_in_final_not_in_separate": missing_in_separate,
+                        "canonical_in_separate_not_in_final": missing_in_final,
                     },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            else:
-                return Response(
-                    {
-                        "error": "Final file's XNS sheets and separate files do not match.",
-                        "details": {
-                            "final_xns_sheets": final_xns_sheets,
-                            "separate_sheet_names": separate_sheet_names,
-                            "canonical_in_final_not_in_separate": missing_in_separate,
-                            "canonical_in_separate_not_in_final": missing_in_final,
-                        },
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # ---------------------- MATCHING LOGIC (between accounts) ---------------------- #
         def compare_files(bank_data_storage):
@@ -648,7 +703,6 @@ class FormatStatement(APIView):
 
             total_matches = 0
             inb_trf_count = 0
-            sis_con_count = 0
 
             def preprocess_df(df, bank_name):
                 if "norm_date" not in df.columns:
@@ -961,7 +1015,7 @@ class FormatStatement(APIView):
 
                     def apply_match(idx1, idx2):
                         nonlocal matches_in_pair, total_matches, df1, df2
-                        nonlocal inb_trf_count, sis_con_count
+                        nonlocal inb_trf_count
 
                         if idx1 in used_idx1 or idx2 in used_idx2:
                             return
@@ -988,10 +1042,8 @@ class FormatStatement(APIView):
                         )
 
                         t = str(type_for_pair).upper()
-                        if t == "INB TRF":
+                        if t in ("INB TRF", "SIS CON"):
                             inb_trf_count += 1
-                        elif t in ("SIS CON", "SIN CON"):
-                            sis_con_count += 1
 
                         used_idx1.add(idx1)
                         used_idx2.add(idx2)
@@ -1055,7 +1107,6 @@ class FormatStatement(APIView):
             print("\n=== FINAL SUMMARY ===")
             print(f"TOTAL MATCHES FOUND: {total_matches}")
             print(f"INB TRF COUNT: {inb_trf_count}")
-            print(f"SIS CON COUNT: {sis_con_count}")
 
             return bank_data_storage
 
@@ -1417,21 +1468,71 @@ class FormatStatement(APIView):
                 "final_rows": int(fin_rows),
             }
 
-        # ---------- NEW: Filter INB TRF/SIS CON and compare with final ---------- #
         def compare_inb_sis_rows(auto_df_full, manual_df_full):
             """
             Compare INB TRF/SIS CON rows between processed and final files
             Returns row numbers for mismatches
             """
-            # Filter processed file for INB TRF only
+            # Categories to ignore when comparing OD and CA accounts
+            IGNORE_CATEGORIES = {
+                "INTEREST", "INTEREST CHARGES", "INTEREST CHARGES REVERSAL",
+                "BANK CHARGES", "RETURN", "RETURN CHARGES", "CHARGES",
+                "REVERSAL", "PENALTY", "PENALTY CHARGES"
+            }
+            
+            def normalize_category(category):
+                """Normalize category for comparison"""
+                if pd.isna(category):
+                    return ""
+                return str(category).strip().upper()
+            
+            def should_ignore_row(row):
+                """Check if a row should be ignored based on category"""
+                category = normalize_category(row.get("Category", ""))
+                if any(ignore_cat in category for ignore_cat in IGNORE_CATEGORIES):
+                    return True
+                return False
+            
+            # Filter processed file for INB TRF/SIS CON only, excluding ignored categories
             auto_inb = auto_df_full[
-                auto_df_full["TYPE"].astype(str).str.upper() == "INB TRF"
+                auto_df_full["TYPE"].astype(str).str.upper().isin(["INB TRF", "SIS CON"])
             ].copy()
             
-            # Filter final file for INB TRF and SIS CON
+            # Filter out rows with ignored categories from processed file
+            auto_inb = auto_inb[~auto_inb.apply(should_ignore_row, axis=1)]
+            
+            # Filter final file for INB TRF and SIS CON, excluding ignored categories
             manual_inb_sis = manual_df_full[
                 manual_df_full["TYPE"].astype(str).str.upper().isin(["INB TRF", "SIS CON"])
             ].copy()
+            
+            # Filter out rows with ignored categories from final file
+            manual_inb_sis = manual_inb_sis[~manual_inb_sis.apply(should_ignore_row, axis=1)]
+            
+            print(f"  After filtering ignored categories:")
+            print(f"    Processed rows: {len(auto_inb)} (original: {len(auto_df_full)})")
+            print(f"    Final rows: {len(manual_inb_sis)} (original: {len(manual_df_full)})")
+            
+            # Show which categories were filtered
+            auto_filtered = auto_df_full[
+                auto_df_full["TYPE"].astype(str).str.upper().isin(["INB TRF", "SIS CON"])
+            ].copy()
+            auto_filtered = auto_filtered[auto_filtered.apply(should_ignore_row, axis=1)]
+            
+            if len(auto_filtered) > 0:
+                print(f"  Filtered categories from processed file:")
+                for category in auto_filtered["Category"].unique():
+                    print(f"    - {category}")
+            
+            manual_filtered = manual_df_full[
+                manual_df_full["TYPE"].astype(str).str.upper().isin(["INB TRF", "SIS CON"])
+            ].copy()
+            manual_filtered = manual_filtered[manual_filtered.apply(should_ignore_row, axis=1)]
+            
+            if len(manual_filtered) > 0:
+                print(f"  Filtered categories from final file:")
+                for category in manual_filtered["Category"].unique():
+                    print(f"    - {category}")
 
             def create_comparison_key(row):
                 """Create key using Date and Description only"""
@@ -1480,13 +1581,14 @@ class FormatStatement(APIView):
 
             return {
                 "auto_inb_count": len(auto_inb),
-                "manual_inb_sis_count": len(manual_inb_sis),
-                "auto_only_rows": sorted(auto_only_rows),  # Row numbers in processed file
-                "manual_only_rows": sorted(manual_only_rows),  # Row numbers in final file
+                "manual_inb_count": len(manual_inb_sis),
+                "auto_only_rows": sorted(auto_only_rows),
+                "manual_only_rows": sorted(manual_only_rows),
                 "auto_only_count": len(auto_only_rows),
                 "manual_only_count": len(manual_only_rows),
-                "auto_key_to_rows": auto_key_to_rows,  # Keep for detailed analysis
-                "manual_key_to_rows": manual_key_to_rows,  # Keep for detailed analysis
+                "filtered_categories": list(IGNORE_CATEGORIES),
+                "auto_filtered_count": len(auto_filtered),
+                "manual_filtered_count": len(manual_filtered),
             }
 
         mismatch_summary = {}
@@ -1580,7 +1682,7 @@ class FormatStatement(APIView):
             }
 
             print(f"  Processed INB TRF rows: {comparison_result['auto_inb_count']}")
-            print(f"  Final INB TRF/SIS CON rows: {comparison_result['manual_inb_sis_count']}")
+            print(f"  Final INB TRF/SIS CON rows: {comparison_result['manual_inb_count']}")
             print(f"  Rows only in processed (green): {comparison_result['auto_only_rows']}")
             print(f"  Rows only in final (red): {comparison_result['manual_only_rows']}")
 
@@ -1703,4 +1805,3 @@ class FormatStatement(APIView):
         }
 
         return Response(response_data, status=status.HTTP_200_OK)
-    

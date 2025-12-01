@@ -114,9 +114,6 @@ pattern = {
         r"(?i)^(?:BY|TO)\s+ONL\s+TRF:\s*CA\s*([0-9]{10,})",
         r"(?i)\(Ref#\s*([A-Z0-9]*\d[A-Z0-9]*)\)",
     ],
-    "UJVN": [
-        r"(?i)\(Ref#\s*([A-Z0-9]+)\)",
-    ],
     "AXIS": [
         r"(?i)^IMPS/P2A/(\d{6,20})/",
         r"(?i)^UPI/P2[AM]/(\d{6,20})/",
@@ -169,9 +166,6 @@ pattern = {
         r"(?i)\bUPI/(?:DR|CR|P2A|P2M)/([0-9]{9,20})/",
         r"(?i)\bUPI.*?\b(?:UTR|RRN|REF(?:ERENCE)?\s*NO\.?)[:\-\s]*([0-9]{9,20})",
         r"(?i)\bUPI.*?([0-9]{9,16})",
-        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
-    ],
-    "KARB": [
         r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
     ],
     "SBI": [
@@ -405,12 +399,6 @@ pattern = {
         r"(?i)^UPI\/(\d+)\/",
         r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
     ],
-    "IDBI": [
-        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
-    ],
-    "UJVN": [
-        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
-    ],
     "UBI": [
         r"(?i)^BY TRANSFER.?RTGS UTR NO[:\s-]([A-Z0-9]{10,30})",
         r"(?i)\bRTGS\s*-\s*([0-9]{12,20})",
@@ -426,9 +414,6 @@ pattern = {
         r"(?i)\b(IMPSCUB\d+)\b",
         r"(?i)\b([A-Z]{4}[A-Z0-9]{10,26})\b",
     ],
-    "UCO": [
-        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
-    ],
     "YES": [
         r"(?i)/IMPS/P2A/(\d{10,16})/",
         r"(?i)/(?:NEFT|RTGS)/[^/]+/([A-Z0-9]{10,30})/",
@@ -442,6 +427,33 @@ pattern = {
         r"(?i)\b(\d+IMPSINB\d+)\b",
         r"(?i)\b(IMPSCUB\d+)\b",
         r"(?i)\b([A-Z]{4}[A-Z0-9]{10,26})\b",
+    ],
+    "UCO": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "CSB": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "DEUT": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "BDBL": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "AUBL": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "CBI": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "KARB": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "IDBI": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "UJVN": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
     ],
     "COMMON": [
         # ---------- IMPS ----------
