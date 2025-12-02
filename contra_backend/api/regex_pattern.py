@@ -29,6 +29,8 @@ pattern = {
         r"(?i)\bUTR\s*(?:NO)?[:\-\s]*([A-Z0-9]{10,22})",
         r"(?i)^MB-IMPS-DR\b.*?Chq:\s*(\d+)",
         r"(?i)\bMB\s+NEFT\s+DR\s+([A-Z][A-Z0-9]{15})\b",
+        r"(?i)^MB\/.*CANARA\/\/(\d+)\s\/",
+        r"(?i)^MB\/.*?SELF\/\s*(\d+)\/",
         r"(?i)^MB/.*?/(\d+)(?=/\s*\d{2}\/\d{2}\/\d{4})",
         r"(?i)^MOB-IMPS-CR\b.*?(\d+)(?=\s*(?:Chq:|,|$))",
         r"(?i)^NEFT SREE DHARANI ENTER\s*(?:/XUTR/)?\s*(IOBAN\d+)",
@@ -151,7 +153,6 @@ pattern = {
     "KVB": [
         r"(?i)^IMPS-(\d+)-",
         r"(?i)^MB-OWN-DR:.*-(\d+)(?:-[a-z]+|-)$",
-        r"^([A-Z0-9]+)-",
         r"(?i)\(Ref#\s*([A-Z0-9]+)\)",
         r"(?i)^BY\s+TRANSFER.*?(?:RTGS|NEFT|IMPS|UPI)\s+UTR\s+NO:\s*([A-Z0-9]+)-",
         r"(?i)^BY\s+TRANSFER.*?UTR\s+NO:\s*([A-Z0-9]+)-",
@@ -201,7 +202,7 @@ pattern = {
         r"(?i)^NBC\/IMPS\/(\d+)\/",
         r"(?i)^MT\/IMPS\/(\d+)\/",
         r"(?i)NET@(\d+)$",
-        r"(?i)\(Ref#\s*([A-Z0-9]+)\)",
+        r"(?i)^TRTR\/(\d+)\/",
         r"(?i)^BY\s+TRANSFER.*?(?:RTGS|NEFT|IMPS|UPI)\s+UTR\s+NO:\s*([A-Z0-9]+)-",
         r"(?i)^BY\s+TRANSFER.*?UTR\s+NO:\s*([A-Z0-9]+)-",
         r"(?i)\bNEFT\s+UTR\s+NO[:\-\s]*([A-Z0-9]{10,22})",
@@ -215,6 +216,7 @@ pattern = {
         r"(?i)\bUPI.*?\b(?:UTR|RRN|REF(?:ERENCE)?\s*NO\.?)[:\-\s]*([0-9]{9,20})",
         r"(?i)\bUPI.*?([0-9]{9,16})",
         r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+        r"(?i)\(Ref#\s*([A-Z0-9]+)\)",
     ],
     "IDIB": [
         r"(?i)^TRANSFER TO .*?//IMPS/P2A/(\d{12})",
@@ -455,6 +457,15 @@ pattern = {
     "UJVN": [
         r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
     ],
+    "ESFB": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "DLXB": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
+    "CITI": [
+        r"(?i)\bRef(?:erence)?\s*(?:No\.?|#)?[:\-\s]*([A-Z0-9]*\d[A-Z0-9]*)",
+    ],
     "COMMON": [
         # ---------- IMPS ----------
         r"(?i)\bIMPS/[^/]+/(\d{9,20})/",
@@ -512,3 +523,6 @@ def extract_imps(desc, bank=None):
             except Exception:
                 return extract_using_common(desc)
     return extract_using_common(desc)
+
+
+print(extract_imps('UPI/545821290593/DR/MONISHA SARANGAP/CNR/UPI (Ref# S36486064)', 'IOB'))

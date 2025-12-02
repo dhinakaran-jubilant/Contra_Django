@@ -42,10 +42,13 @@ class FormatStatement(APIView):
             "Bank of India, India": "BOI",
             "Bandhan Bank, India": "BDBL",
             "Canara Bank, India": "CNRB",
-            "City Union Bank, India": "CUB",
             "Catholic Syrian Bank, India": "CSB",
+            "Citibank, India": "CITI",
+            "City Union Bank, India": "CUB",
             "DBS Bank, India": "DBS",
+            "Dhanalakshmi Bank Ltd., India": "DLXB",
             "Deutsche Bank, India": "DEUT",
+            "Equitas Bank, India": "ESFB",
             "Federal Bank, India": "FDRL",
             "HDFC Bank, India": "HDFC",
             "ICICI Bank, India": "ICICI",
@@ -829,15 +832,7 @@ class FormatStatement(APIView):
                     return matches[0]
                 return None
 
-            def find_self_candidate(
-                row1,
-                df2,
-                lookup_df2,
-                amount_col1,
-                amount_col2,
-                this_acc_name,
-                other_acc_name,
-            ):
+            def find_self_candidate(row1, df2, lookup_df2, amount_col1, amount_col2, this_acc_name, other_acc_name):
                 try:
                     amt1 = float(row1[amount_col1])
                 except (TypeError, ValueError):
@@ -848,9 +843,17 @@ class FormatStatement(APIView):
                 if not acc_candidates:
                     return None
 
-                this_norm = str(this_acc_name or "").strip().upper()
-                other_norm = str(other_acc_name or "").strip().upper()
-                cat1_norm = str(row1.get("Category", "")).strip().upper()
+                # Normalize account names
+                this_norm = normalize_name(this_acc_name) if this_acc_name else ""
+                other_norm = normalize_name(other_acc_name) if other_acc_name else ""
+
+                # Get and normalize category from row1
+                cat1_raw = str(row1.get("Category", "")).strip()
+                cat1_norm = normalize_name(cat1_raw)
+                
+                # Get and normalize description from row1
+                desc1_raw = str(row1.get("Description", "")).strip()
+                desc1_norm = normalize_name(desc1_raw)
 
                 matches = []
 
@@ -864,31 +867,65 @@ class FormatStatement(APIView):
                     if amt2 != amt1:
                         continue
 
-                    cat2_norm = str(row2.get("Category", "")).strip().upper()
+                    # Get and normalize category from row2
+                    cat2_raw = str(row2.get("Category", "")).strip()
+                    cat2_norm = normalize_name(cat2_raw)
+                    
+                    # Get and normalize description from row2
+                    desc2_raw = str(row2.get("Description", "")).strip()
+                    desc2_norm = normalize_name(desc2_raw)
 
-                    df1_ok = (cat1_norm == "SELF") or (
-                        other_norm and cat1_norm == other_norm
-                    )
-                    df2_ok = (cat2_norm == "SELF") or (
-                        this_norm and cat2_norm == this_norm
-                    )
+                    # Check conditions for row1
+                    cat1_is_self = cat1_raw.upper() == "SELF"
+                    cat1_has_other = other_norm and other_norm in cat1_norm
+                    desc1_has_other = other_norm and other_norm in desc1_norm
+                    
+                    # Check conditions for row2
+                    cat2_is_self = cat2_raw.upper() == "SELF"
+                    cat2_has_other = other_norm and other_norm in cat2_norm
+                    desc2_has_other = other_norm and other_norm in desc2_norm
+                   
+                    # Apply your 9 conditions exactly:
+                    conditions = []
+                    
+                    # 1. self(category) + self(category) = matched
+                    conditions.append(cat1_is_self and cat2_is_self)
+                    
+                    # 2. self(category) + opposite_bank_acc_name(category) = matched
+                    conditions.append(cat1_is_self and cat2_has_other)
+                    
+                    # 3. self(category) + opposite_bank_acc_name(description) = matched
+                    conditions.append(cat1_is_self and desc2_has_other)
+                    
+                    # 4. opposite_bank_acc_name(category) + self(category) = matched
+                    conditions.append(cat1_has_other and cat2_is_self)
+                    
+                    # 5. opposite_bank_acc_name(category) + opposite_bank_acc_name(category) = matched
+                    conditions.append(cat1_has_other and cat2_has_other)
+                    
+                    # 6. opposite_bank_acc_name(category) + opposite_bank_acc_name(description) = matched
+                    conditions.append(cat1_has_other and desc2_has_other)
+                    
+                    # 7. opposite_bank_acc_name(description) + self(category) = matched
+                    conditions.append(desc1_has_other and cat2_is_self)
+                    
+                    # 8. opposite_bank_acc_name(description) + opposite_bank_acc_name(category) = matched
+                    conditions.append(desc1_has_other and cat2_has_other)
+                    
+                    # 9. opposite_bank_acc_name(description) + opposite_bank_acc_name(description) = matched
+                    conditions.append(desc1_has_other and desc2_has_other)
+                    
+                    # Check if ANY of the conditions is true
+                    is_match = any(conditions)
 
-                    if df1_ok and df2_ok:
+                    if is_match:
                         matches.append(idx2)
 
                 if len(matches) == 1:
                     return matches[0]
                 return None
 
-            def find_acc_candidate(
-                row1,
-                df2,
-                lookup_df2,
-                acc_suffix_df1,
-                acc_suffix_df2,
-                amount_col1,
-                amount_col2,
-            ):
+            def find_acc_candidate(row1, df2, lookup_df2, acc_suffix_df1, acc_suffix_df2, amount_col1, amount_col2):
                 date_key = row1["norm_date"]
                 acc_candidates = lookup_df2.get(date_key, [])
                 if not acc_candidates:
@@ -951,19 +988,8 @@ class FormatStatement(APIView):
                     return matches[0]
                 return None
 
-            def choose_candidate_for_row(
-                row1,
-                df2,
-                lookup_df2,
-                acc_suffix_df1,
-                acc_suffix_df2,
-                amount_col1,
-                amount_col2,
-                other_acc_name,
-                used2,
-                name1,
-                name2,
-            ):
+            def choose_candidate_for_row(row1, df2, lookup_df2, acc_suffix_df1, acc_suffix_df2, amount_col1, amount_col2, 
+                                        other_acc_name, used2, name1, name2):
                 idx2 = find_imps_candidate(
                     row1, df2, lookup_df2, amount_col1, amount_col2
                 )
@@ -982,15 +1008,8 @@ class FormatStatement(APIView):
                 if idx2 is not None and idx2 not in used2:
                     return idx2
 
-                idx2 = find_acc_candidate(
-                    row1,
-                    df2,
-                    lookup_df2,
-                    acc_suffix_df1,
-                    acc_suffix_df2,
-                    amount_col1,
-                    amount_col2,
-                )
+                idx2 = find_acc_candidate(row1, df2, lookup_df2, acc_suffix_df1, acc_suffix_df2, 
+                                          amount_col1, amount_col2)
                 if idx2 is not None and idx2 not in used2:
                     return idx2
 
@@ -1063,49 +1082,27 @@ class FormatStatement(APIView):
                         matches_in_pair += 1
                         total_matches += 1
 
-                    def process_case(
-                        df1_side, df2_lookup, amount_col1, amount_col2, other_acc_name
-                    ):
+                    def process_case(df1_side, df2_lookup, amount_col1, amount_col2, other_acc_name):
                         for idx1, row1 in df1_side.iterrows():
                             if idx1 in used_idx1:
                                 continue
-                            idx2 = choose_candidate_for_row(
-                                row1=row1,
-                                df2=df2,
-                                lookup_df2=df2_lookup,
-                                acc_suffix_df1=acc_suffix_df1,
-                                acc_suffix_df2=acc_suffix_df2,
-                                amount_col1=amount_col1,
-                                amount_col2=amount_col2,
-                                other_acc_name=other_acc_name,
-                                used2=used_idx2,
-                                name1=name1,
-                                name2=name2,
-                            )
+                            idx2 = choose_candidate_for_row(row1=row1, df2=df2, lookup_df2=df2_lookup, 
+                                                            acc_suffix_df1=acc_suffix_df1, acc_suffix_df2=acc_suffix_df2,
+                                                            amount_col1=amount_col1, amount_col2=amount_col2, 
+                                                            other_acc_name=other_acc_name, used2=used_idx2,
+                                                            name1=name1, name2=name2)
                             if idx2 is not None:
                                 apply_match(idx1, idx2)
 
                     # CASE 1: df1 CR > 0 vs df2 DR > 0
                     lookup_case1 = build_lookup_by_date(df2, "DR_val")
                     df1_case1 = df1[df1["CR_val"] > 0]
-                    process_case(
-                        df1_case1,
-                        lookup_case1,
-                        amount_col1="CR_val",
-                        amount_col2="DR_val",
-                        other_acc_name=name1,
-                    )
+                    process_case(df1_case1,lookup_case1,amount_col1="CR_val",amount_col2="DR_val",other_acc_name=name1)
 
                     # CASE 2: df1 DR > 0 vs df2 CR > 0
                     lookup_case2 = build_lookup_by_date(df2, "CR_val")
                     df1_case2 = df1[df1["DR_val"] > 0]
-                    process_case(
-                        df1_case2,
-                        lookup_case2,
-                        amount_col1="DR_val",
-                        amount_col2="CR_val",
-                        other_acc_name=name1,
-                    )
+                    process_case(df1_case2, lookup_case2, amount_col1="DR_val", amount_col2="CR_val", other_acc_name=name1)
 
                     print(f"📊 Matches in this pair: {matches_in_pair}")
 
@@ -1257,7 +1254,7 @@ class FormatStatement(APIView):
                     safe_name_parts.remove("XNS")
                 safe_name = "-".join(safe_name_parts)
                 acc_name = acc_name_storage[key]
-                safe_acc_name = acc_name.replace("/", "_")
+                safe_acc_name = acc_name.replace("/", "_").replace(",", "")
 
                 download_path = get_downloads()
                 base_dir = download_path / PROCESSED_DIR
