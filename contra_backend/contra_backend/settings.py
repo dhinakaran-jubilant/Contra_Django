@@ -119,14 +119,14 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = '/static/'
+STATIC_URL = '/safe_storage/'
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'static'),
+    os.path.join(BASE_DIR, 'safe_storage'),
 ]
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Google Sheets configuration
-# GOOGLE_SHEETS_CREDENTIALS_PATH = os.path.join(BASE_DIR, 'static', 'config', 'robust-shadow-471605-k1-6152c9ae90ff.json')
+# GOOGLE_SHEETS_CREDENTIALS_PATH = os.path.join(BASE_DIR, 'safe_storage', 'robust-shadow-471605-k1-6152c9ae90ff.json')
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

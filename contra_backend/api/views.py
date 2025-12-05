@@ -1,5 +1,6 @@
 from .regex_pattern import extract_imps
 from .update_sheet import update_google_sheets
+from .spacy_normalize import is_same_name, description_contains_category
 from openpyxl.styles import PatternFill, Font, Border, Side, Alignment
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
@@ -25,7 +26,7 @@ class FormatStatement(APIView):
     def post(self, request, *args, **kwargs):
         excel_files = request.FILES.getlist("files")
 
-        AMOUNT_TOLERANCE = 25.0
+        AMOUNT_TOLERANCE = 100.0
         PROCESSED_DIR = "Matched_Statemants"
 
         TITLE_WORDS = {"MR", "MRS", "MS", "MISS", "DR", "SHRI", "SMT"}
@@ -33,7 +34,7 @@ class FormatStatement(APIView):
             "AGENCY", "AGENCIES", "ENTERPRISE", "ENTERPRISES", "TRADERS", "TRADING",
             "INDUSTRIES", "INDUSTRY", "CO", "COMPANY", "LLP", "LTD", "LIMITED",
             "ASSOCIATES", "TRUST", "FOUNDATION", "CENTRE", "CENTER",
-            "STORE", "STORES", "SHOP",
+            "STORE", "STORES", "SHOP", "SOLUTIONS", "PVT", "PRIVATE"
         }
 
         SHORT_BANK_NAMES = {
@@ -64,6 +65,7 @@ class FormatStatement(APIView):
             "Kotak Mahindra Bank, India": "KKBK",
             "Punjab National Bank, India": "PNB",
             "RBL Bank, India": "RBL",
+            "RBL (Ratnakar) Bank, India": "RBL",
             "South Indian Bank, India": "SIB",
             "State Bank of India, India": "SBI",
             "Standard Chartered Bank, India": "",
@@ -120,8 +122,21 @@ class FormatStatement(APIView):
 
         def get_numbers(desc):
             text = str(desc)
+            
+            # First, try the original pattern for masked accounts
             text_no_space = re.sub(r"\s+", "", text)
             matches = re.findall(r"(?:X|x){4,}\d{3,}", text_no_space)
+            
+            # If no matches found, check for specific account number patterns
+            if not matches:
+                pattern1 = r'MOB/SELFFT/[^/]+/(\d{12,16})'
+                matches1 = re.findall(pattern1, text, re.IGNORECASE)
+                matches.extend(matches1)
+                
+                pattern2 = r'Self Transfer (?:to|from) (\d{12,16})'
+                matches2 = re.findall(pattern2, text, re.IGNORECASE)
+                matches.extend(matches2)
+            
             return matches
 
         def extract_acc_suffix_from_key(key):
@@ -154,16 +169,37 @@ class FormatStatement(APIView):
                 return None
 
         def normalize_name(name: str) -> str:
+            """Normalize company names by removing common variations"""
+            if not name or not isinstance(name, str):
+                return ""
+            
             s = str(name).upper().strip()
-            s = s.replace("M/S.", " ")
-            s = s.replace("M/S", " ")
-            s = re.sub(r"[^\w\s]", " ", s)
+            
+            # Remove common prefixes
+            s = re.sub(r"^M/S[.\s]*", "", s)
+            s = re.sub(r"^THE\s+", "", s)
+            
+            # Standardize company suffixes
+            s = re.sub(r"\b(PVT|PRIVATE)\s+(LTD|LIMITED)\b", "PVT LTD", s)
+            s = re.sub(r"\bPVT\.?\s*LTD\.?\b", "PVT LTD", s)
+            s = re.sub(r"\bPRIVATE\s+LIMITED\b", "PVT LTD", s)
+            s = re.sub(r"\bLTD\.?\b", "LTD", s)
+            s = re.sub(r"\bCO\.?\b", "CO", s)
+            s = re.sub(r"\bAND\b", "&", s)
+            
+            # Remove special characters
+            s = re.sub(r"[^\w\s&]", " ", s)
             s = re.sub(r"\s+", " ", s).strip()
+            
+            # Remove common titles
             parts = [p for p in s.split() if p not in TITLE_WORDS]
             return " ".join(parts)
 
         def get_party_type(raw_name: str) -> str:
             norm = normalize_name(raw_name)
+            if not norm:
+                return "OTHER"
+            
             tokens = norm.split()
             if any(tok in FIRM_KEYWORDS for tok in tokens):
                 return "COMPANY"
@@ -173,32 +209,83 @@ class FormatStatement(APIView):
                 return "PERSON"
             return "OTHER"
 
+        def extract_core_name(name: str) -> str:
+            """Extract the core business name by removing company suffixes"""
+            norm = normalize_name(name)
+            if not norm:
+                return ""
+            
+            # Remove common company suffixes
+            suffixes = ["PVT LTD", "LTD", "LIMITED", "CO", "LLP", "PVT", "PRIVATE"]
+            core = norm
+            for suffix in suffixes:
+                pattern = r"\s+" + re.escape(suffix) + r"\b"
+                core = re.sub(pattern, "", core, flags=re.IGNORECASE)
+            
+            # Remove any standalone ampersands
+            core = re.sub(r"\s*&\s*", " ", core).strip()
+            
+            return core
+
         def same_entity(name1: str, name2: str) -> bool:
+            """Check if two names refer to the same entity"""
+            if not name1 or not name2:
+                return False
+            
             n1 = normalize_name(name1)
             n2 = normalize_name(name2)
-            if not n1 or not n2:
-                return False
+            
+            # If normalized names are identical
             if n1 == n2:
                 return True
-
-            t1 = n1.split()
-            t2 = n2.split()
-
-            shorter, longer = (t1, t2) if len(t1) <= len(t2) else (t2, t1)
-            if len(shorter) >= 2 and longer[: len(shorter)] == shorter:
+            
+            # Extract core names (without company suffixes)
+            core1 = extract_core_name(name1)
+            core2 = extract_core_name(name2)
+            
+            # If core names are identical
+            if core1 and core2 and core1 == core2:
                 return True
-
-            common = set(t1) & set(t2)
-            if get_party_type(name1) == "PERSON" and get_party_type(name2) == "PERSON":
-                return len(common) >= 2
-
+            
+            # Split into tokens
+            t1 = set(core1.split())
+            t2 = set(core2.split())
+            
+            # If both are empty after processing
+            if not t1 or not t2:
+                return False
+            
+            # Check for significant overlap
+            common = t1.intersection(t2)
+            
+            # For companies, check if most words match
             if get_party_type(name1) == "COMPANY" and get_party_type(name2) == "COMPANY":
-                min_len = min(len(t1), len(t2))
-                return len(common) >= max(2, min_len - 1)
-
+                # Get the minimum length (excluding common filler words)
+                filler_words = {"THE", "AND", "OF", "FOR", "WITH"}
+                t1_filtered = {t for t in t1 if t not in filler_words}
+                t2_filtered = {t for t in t2 if t not in filler_words}
+                common_filtered = {t for t in common if t not in filler_words}
+                
+                min_len = min(len(t1_filtered), len(t2_filtered))
+                if min_len == 0:
+                    return False
+                
+                # If most words match
+                match_ratio = len(common_filtered) / min_len
+                if match_ratio >= 0.7:  # 70% match
+                    return True
+                
+                # Check for acronym/abbreviation match
+                # E.g., "GTIMES" vs "G TIMES"
+                core1_no_space = core1.replace(" ", "")
+                core2_no_space = core2.replace(" ", "")
+                if core1_no_space == core2_no_space:
+                    return True
+            
             return False
 
         def infer_transfer_type(name_from: str, name_to: str) -> str:
+            """Infer the type of transfer between two entities"""
             t1 = get_party_type(name_from)
             t2 = get_party_type(name_to)
 
@@ -776,6 +863,13 @@ class FormatStatement(APIView):
             def find_imps_candidate(row1, df2, lookup_df2, amount_col1, amount_col2):
                 row1_imps = row1.get("IMPS")
                 desc1 = str(row1.get("Description", ""))
+                
+                def extract_numbers_5plus_digits(text):
+                    """Extract all numbers with 5 or more digits from text"""
+                    if not text:
+                        return []
+                    # Find all sequences of 5 or more digits
+                    return re.findall(r'\b\d{5,}\b', text)
 
                 try:
                     amt1 = float(row1[amount_col1])
@@ -794,28 +888,56 @@ class FormatStatement(APIView):
                     return None
 
                 matches = []
+                
+                # Extract numbers from desc1 once
+                desc1_numbers = extract_numbers_5plus_digits(desc1)
+                
                 for idx2 in candidate_idx2_list:
                     row2 = df2.loc[idx2]
                     row2_imps = row2.get("IMPS")
                     desc2 = str(row2.get("Description", ""))
 
-                    has_imps1 = bool(row1_imps)
-                    has_imps2 = bool(row2_imps)
+                    has_imps1 = bool(row1_imps) and isinstance(row1_imps, str) and len(row1_imps) >= 5
+                    has_imps2 = bool(row2_imps) and isinstance(row2_imps, str) and len(row2_imps) >= 5
 
                     if not (has_imps1 or has_imps2):
                         continue
 
                     imps_ok = False
-
-                    if has_imps1 and isinstance(row1_imps, str):
-                        tail1 = row1_imps[-5:] if len(row1_imps) > 5 else row1_imps
-                        if tail1 and tail1 in desc2:
+                    match_details = ""
+                    
+                    # CHECK 1: Direct IMPS last 5 digits match
+                    if has_imps1 and has_imps2:
+                        row1_imps_tail = row1_imps[-5:]  # Get last 5 digits
+                        row2_imps_tail = row2_imps[-5:]  # Get last 5 digits
+                        
+                        if row1_imps_tail == row2_imps_tail:
                             imps_ok = True
+                            match_details = f"Direct IMPS match: row1_imps tail={row1_imps_tail} == row2_imps tail={row2_imps_tail}"
+                            print(f"✅ {match_details}")
 
-                    if (not imps_ok) and has_imps2 and isinstance(row2_imps, str):
-                        tail2 = row2_imps[-5:] if len(row2_imps) > 5 else row2_imps
-                        if tail2 and tail2 in desc1:
-                            imps_ok = True
+                    # CHECK 2: row1_imps last 5 digits match ending of any number in desc2
+                    if (not imps_ok) and has_imps1:
+                        desc2_numbers = extract_numbers_5plus_digits(desc2)
+                        row1_imps_tail = row1_imps[-5:]  # Get last 5 digits
+                        
+                        for number in desc2_numbers:
+                            if number.endswith(row1_imps_tail):
+                                imps_ok = True
+                                match_details = f"row1_imps tail={row1_imps_tail} ends desc2 number={number}"
+                                print(f"✅ {match_details}")
+                                break
+                    
+                    # CHECK 3: row2_imps last 5 digits match ending of any number in desc1
+                    if (not imps_ok) and has_imps2:
+                        row2_imps_tail = row2_imps[-5:]  # Get last 5 digits
+                        
+                        for number in desc1_numbers:
+                            if number.endswith(row2_imps_tail):
+                                imps_ok = True
+                                match_details = f"row2_imps tail={row2_imps_tail} ends desc1 number={number}"
+                                print(f"✅ {match_details}")
+                                break
 
                     if not imps_ok:
                         continue
@@ -832,7 +954,77 @@ class FormatStatement(APIView):
                     return matches[0]
                 return None
 
-            def find_self_candidate(row1, df2, lookup_df2, amount_col1, amount_col2, this_acc_name, other_acc_name):
+            # def find_self_candidate(row1, df2, lookup_df2, amount_col1, amount_col2, this_acc_name, other_acc_name):
+            #     try:
+            #         amt1 = float(row1[amount_col1])
+            #     except (TypeError, ValueError):
+            #         return None
+
+            #     date_key = row1["norm_date"]
+            #     acc_candidates = lookup_df2.get(date_key, [])
+            #     if not acc_candidates:
+            #         return None
+
+            #     # Normalize account names
+            #     # this_norm = normalize_name(this_acc_name) if this_acc_name else ""
+            #     # other_norm = normalize_name(other_acc_name) if other_acc_name else ""
+
+            #     # Get and normalize category from row1
+            #     cat1_raw = str(row1.get("Category", "")).strip()
+            #     # cat1_norm = normalize_name(cat1_raw)
+                
+            #     # Get and normalize description from row1
+            #     desc1_raw = str(row1.get("Description", "")).strip()
+            #     # desc1_norm = normalize_name(desc1_raw)
+
+            #     matches = []
+            #     for idx2 in acc_candidates:
+            #         row2 = df2.loc[idx2]
+            #         try:
+            #             amt2 = float(row2[amount_col2])
+            #         except (TypeError, ValueError):
+            #             continue
+            #         if amt2 != amt1:
+            #             continue
+                    
+            #         cat2_raw = str(row2.get("Category", "")).strip()
+            #         desc2_raw = str(row2.get("Description", "")).strip()
+                    
+            #         is_match = False
+
+            #         if cat1_raw.upper() == 'SELF':
+            #             # if cat2_raw.upper() == 'SELF':
+            #             #     is_match = True
+            #             if is_same_name(this_acc_name, cat2_raw)['same']:
+            #                 is_match = True
+            #             elif description_contains_category(this_acc_name, desc2_raw)['contains']:
+            #                 is_match = True
+                        
+            #         elif is_same_name(other_acc_name, cat1_raw)['same']:
+            #             if cat2_raw.upper() == 'SELF':
+            #                 is_match = True
+            #             elif is_same_name(this_acc_name, cat2_raw)['same']:
+            #                 is_match = True
+            #             elif description_contains_category(this_acc_name, desc2_raw)['contains']:
+            #                 is_match = True
+                        
+            #         # elif description_contains_category(other_acc_name, desc1_raw)['contains']:
+            #         #     if cat2_raw.upper() == 'SELF':
+            #         #         is_match = True
+            #         #     elif is_same_name(this_acc_name, cat2_raw)['same']:
+            #         #         is_match = True
+            #         #     elif description_contains_category(this_acc_name, desc2_raw)['contains']:
+            #         #         is_match = True
+                    
+            #         if is_match:
+            #             matches.append(idx2)
+
+            #     if len(matches) == 1:
+            #         return matches[0]
+            #     return None
+            
+
+            def find_self_candidate(row1, df2, lookup_df2, amount_col1, amount_col2, this_acc_name, other_acc_name, df1_key, df2_key):
                 try:
                     amt1 = float(row1[amount_col1])
                 except (TypeError, ValueError):
@@ -843,86 +1035,183 @@ class FormatStatement(APIView):
                 if not acc_candidates:
                     return None
 
-                # Normalize account names
-                this_norm = normalize_name(this_acc_name) if this_acc_name else ""
-                other_norm = normalize_name(other_acc_name) if other_acc_name else ""
-
                 # Get and normalize category from row1
                 cat1_raw = str(row1.get("Category", "")).strip()
-                cat1_norm = normalize_name(cat1_raw)
                 
                 # Get and normalize description from row1
                 desc1_raw = str(row1.get("Description", "")).strip()
-                desc1_norm = normalize_name(desc1_raw)
-
+                
+                # Helper function to extract last 4 digits of account number from sheet key
+                def extract_acc_suffix_from_key(key):
+                    """Extract last 4 digits of account number from key like XNS-BANKCODE-ACCNUM-PRODUCT"""
+                    key_parts = key.split("-")
+                    for part in key_parts:
+                        # Handle 3-digit accounts with X prefix, 4-digit accounts
+                        clean_part = part.replace('X', '')  # Remove X prefix if present
+                        if len(clean_part) in [3, 4] and clean_part.isdigit():
+                            return clean_part[-4:]  # Get last 4 digits (handles 3-digit by padding)
+                    return None
+                
+                # Get account suffixes for both comparing accounts
+                df1_acc_suffix = extract_acc_suffix_from_key(df1_key)  # e.g., "3922" from XNS-HDFC-3922-CA
+                df2_acc_suffix = extract_acc_suffix_from_key(df2_key)  # e.g., "9079" from XNS-IDIB-9079-OD
+                
+                # Check NUMBERS column in row1
+                row1_acc_suffixes = []
+                row1_numbers = row1.get("NUMBERS", [])
+                
+                # Only use NUMBERS column if it exists and has data
+                if isinstance(row1_numbers, list) and len(row1_numbers) > 0:
+                    for num in row1_numbers:
+                        if isinstance(num, str) and len(num) >= 4:
+                            # Get last 4 digits
+                            suffix = num[-4:]
+                            if suffix.isdigit():
+                                row1_acc_suffixes.append(suffix)
+                
+                # LOGIC: If account number is present in NUMBERS column, it MUST match one of the comparing accounts
+                if row1_acc_suffixes:
+                    # Check if any account suffix matches df1 or df2 account
+                    account_match_found = False
+                    for suffix in row1_acc_suffixes:
+                        if (df1_acc_suffix and suffix == df1_acc_suffix) or \
+                        (df2_acc_suffix and suffix == df2_acc_suffix):
+                            account_match_found = True
+                            print(f"✅ Row1 account {suffix} matches comparing account ({df1_acc_suffix} or {df2_acc_suffix})")
+                            break
+                    
+                    if not account_match_found:
+                        return None  # VETO: Account present but doesn't match
+                
                 matches = []
-
                 for idx2 in acc_candidates:
                     row2 = df2.loc[idx2]
-
                     try:
                         amt2 = float(row2[amount_col2])
                     except (TypeError, ValueError):
                         continue
                     if amt2 != amt1:
                         continue
-
-                    # Get and normalize category from row2
+                    
                     cat2_raw = str(row2.get("Category", "")).strip()
-                    cat2_norm = normalize_name(cat2_raw)
-                    
-                    # Get and normalize description from row2
                     desc2_raw = str(row2.get("Description", "")).strip()
-                    desc2_norm = normalize_name(desc2_raw)
+                    
+                    # Check NUMBERS column in row2
+                    row2_acc_suffixes = []
+                    row2_numbers = row2.get("NUMBERS", [])
+                    
+                    # Only use NUMBERS column if it exists and has data
+                    if isinstance(row2_numbers, list) and len(row2_numbers) > 0:
+                        for num in row2_numbers:
+                            if isinstance(num, str) and len(num) >= 4:
+                                # Get last 4 digits
+                                suffix = num[-4:]
+                                if suffix.isdigit():
+                                    row2_acc_suffixes.append(suffix)
+                    
+                    # LOGIC: If account number is present in row2 NUMBERS column, it MUST match one of the comparing accounts
+                    if row2_acc_suffixes:
+                        account_match_found = False
+                        for suffix in row2_acc_suffixes:
+                            if (df1_acc_suffix and suffix == df1_acc_suffix) or \
+                            (df2_acc_suffix and suffix == df2_acc_suffix):
+                                account_match_found = True
+                                break
+                        
+                        if not account_match_found:
+                            continue
+                    
+                    is_match = False
 
-                    # Check conditions for row1
-                    cat1_is_self = cat1_raw.upper() == "SELF"
-                    cat1_has_other = other_norm and other_norm in cat1_norm
-                    desc1_has_other = other_norm and other_norm in desc1_norm
+                    if cat1_raw.upper() == 'SELF':
+                        if is_same_name(this_acc_name, cat2_raw)['same']:
+                            is_match = True
+                        elif description_contains_category(this_acc_name, desc2_raw)['contains']:
+                            is_match = True
+                        
+                    elif is_same_name(other_acc_name, cat1_raw)['same']:
+                        if cat2_raw.upper() == 'SELF':
+                            is_match = True
+                        elif is_same_name(this_acc_name, cat2_raw)['same']:
+                            is_match = True
+                        elif description_contains_category(this_acc_name, desc2_raw)['contains']:
+                            is_match = True
                     
-                    # Check conditions for row2
-                    cat2_is_self = cat2_raw.upper() == "SELF"
-                    cat2_has_other = other_norm and other_norm in cat2_norm
-                    desc2_has_other = other_norm and other_norm in desc2_norm
-                   
-                    # Apply your 9 conditions exactly:
-                    conditions = []
-                    
-                    # 1. self(category) + self(category) = matched
-                    conditions.append(cat1_is_self and cat2_is_self)
-                    
-                    # 2. self(category) + opposite_bank_acc_name(category) = matched
-                    conditions.append(cat1_is_self and cat2_has_other)
-                    
-                    # 3. self(category) + opposite_bank_acc_name(description) = matched
-                    conditions.append(cat1_is_self and desc2_has_other)
-                    
-                    # 4. opposite_bank_acc_name(category) + self(category) = matched
-                    conditions.append(cat1_has_other and cat2_is_self)
-                    
-                    # 5. opposite_bank_acc_name(category) + opposite_bank_acc_name(category) = matched
-                    conditions.append(cat1_has_other and cat2_has_other)
-                    
-                    # 6. opposite_bank_acc_name(category) + opposite_bank_acc_name(description) = matched
-                    conditions.append(cat1_has_other and desc2_has_other)
-                    
-                    # 7. opposite_bank_acc_name(description) + self(category) = matched
-                    conditions.append(desc1_has_other and cat2_is_self)
-                    
-                    # 8. opposite_bank_acc_name(description) + opposite_bank_acc_name(category) = matched
-                    conditions.append(desc1_has_other and cat2_has_other)
-                    
-                    # 9. opposite_bank_acc_name(description) + opposite_bank_acc_name(description) = matched
-                    conditions.append(desc1_has_other and desc2_has_other)
-                    
-                    # Check if ANY of the conditions is true
-                    is_match = any(conditions)
-
                     if is_match:
                         matches.append(idx2)
 
                 if len(matches) == 1:
                     return matches[0]
+                return None
+            
+            def find_etxn_match(row1, df2, lookup_df2, amount_col1, amount_col2, matched_indices_df2):
+                """Find eTXN matches based on description pattern, amount, and date."""
+                try:
+                    amt1 = float(row1[amount_col1])
+                except (TypeError, ValueError):
+                    return None
+                
+                # Check if row1 has eTXN pattern and Transfer category
+                desc1 = str(row1.get("Description", "")).strip()
+                cat1 = str(row1.get("Category", "")).strip().upper()
+                
+                # Check for eTXN pattern and Transfer category
+                has_etxn_pattern1 = re.search(r"(?i)^eTXN\/(?:By|To):(\d+)(?:\/Trf)?", desc1, re.IGNORECASE) is not None
+                is_transfer_category1 = cat1 in ["TRANSFER IN", "TRANSFER OUT"]
+                
+                if not (has_etxn_pattern1 and is_transfer_category1):
+                    return None
+                
+                date_key = row1["norm_date"]
+                candidates = lookup_df2.get(date_key, [])
+                if not candidates:
+                    return None
+                
+                for idx2 in candidates:
+                    if idx2 in matched_indices_df2:
+                        continue
+                        
+                    row2 = df2.loc[idx2]
+                    
+                    try:
+                        amt2 = float(row2[amount_col2])
+                    except (TypeError, ValueError):
+                        continue
+                    
+                    if amt2 != amt1:
+                        continue
+                    
+                    # Check if row2 also has eTXN pattern and Transfer category
+                    desc2 = str(row2.get("Description", "")).strip()
+                    cat2 = str(row2.get("Category", "")).strip().upper()
+                    
+                    has_etxn_pattern2 = re.search(r"(?i)^eTXN\/(?:By|To):(\d+)(?:\/Trf)?", desc2, re.IGNORECASE) is not None
+                    is_transfer_category2 = cat2 in ["TRANSFER IN", "TRANSFER OUT"]
+                    
+                    if has_etxn_pattern2 and is_transfer_category2:
+                        # Extract the eTXN ID to verify it's the same transaction
+                        match1 = re.search(r"(?i)^eTXN\/(?:By|To):(\d+)(?:\/Trf)?", desc1, re.IGNORECASE)
+                        match2 = re.search(r"(?i)^eTXN\/(?:By|To):(\d+)(?:\/Trf)?", desc2, re.IGNORECASE)
+                        
+                        if match1 and match2:
+                            etxn_id1 = match1.group(1)
+                            etxn_id2 = match2.group(1)
+                            
+                            if etxn_id1 == etxn_id2:
+                                # Same eTXN ID - definitely a match
+                                return idx2
+                            else:
+                                # Different eTXN IDs but same amount/date - could still be related
+                                # Check if amounts are opposite (one credit, one debit)
+                                if (cat1 == "TRANSFER IN" and cat2 == "TRANSFER OUT") or \
+                                (cat1 == "TRANSFER OUT" and cat2 == "TRANSFER IN"):
+                                    return idx2
+                        else:
+                            # eTXN pattern exists but no ID extracted - match by amount/date/pattern
+                            if (cat1 == "TRANSFER IN" and cat2 == "TRANSFER OUT") or \
+                            (cat1 == "TRANSFER OUT" and cat2 == "TRANSFER IN"):
+                                return idx2
+                
                 return None
 
             def find_acc_candidate(row1, df2, lookup_df2, acc_suffix_df1, acc_suffix_df2, amount_col1, amount_col2):
@@ -996,17 +1285,19 @@ class FormatStatement(APIView):
                 if idx2 is not None and idx2 not in used2:
                     return idx2
 
-                idx2 = find_self_candidate(
-                    row1=row1,
-                    df2=df2,
-                    lookup_df2=lookup_df2,
-                    amount_col1=amount_col1,
-                    amount_col2=amount_col2,
-                    this_acc_name=name1,
-                    other_acc_name=name2,
+                idx2 = find_self_candidate( row1=row1, df2=df2, lookup_df2=lookup_df2, amount_col1=amount_col1, 
+                                           amount_col2=amount_col2, this_acc_name=name1, other_acc_name=name2,
+                                           df1_key=df1_key, df2_key=df2_key
                 )
                 if idx2 is not None and idx2 not in used2:
                     return idx2
+                
+                idx2 = find_etxn_match(
+                    row1, df2, lookup_df2, amount_col1, amount_col2, used2
+                )
+                if idx2 is not None and idx2 not in used2:
+                    return idx2
+
 
                 idx2 = find_acc_candidate(row1, df2, lookup_df2, acc_suffix_df1, acc_suffix_df2, 
                                           amount_col1, amount_col2)
